@@ -27,6 +27,7 @@ object SbtData {
   }
 
   def from(classLoader: ClassLoader, pluginRoot: File, javaClassVersion: String): Either[String, SbtData] = {
+
     Either.cond(pluginRoot.exists, pluginRoot,
       "SBT home directory does not exist: " + pluginRoot).flatMap { sbtHome =>
 
@@ -38,20 +39,21 @@ object SbtData {
           .toRight("No 'sbt-interface.jar' in SBT home directory")
           .flatMap { interfaceJar =>
 
-          files.find(_.getName == "compiler-interface-sources.jar")
-            .toRight("No 'compiler-interface-sources.jar' in SBT home directory")
-            .flatMap { sourceJar =>
+//            HydraData.hydraBridge.orElse(files.find(_.getName == "compiler-interface-sources.jar"))
+            files.find(_.getName == "compiler-interface-sources.jar")
+              .toRight("No 'compiler-interface-sources.jar' in SBT home directory")
+              .flatMap { sourceJar =>
 
-            readSbtVersionFrom(classLoader)
-              .toRight("Unable to read SBT version from JVM classpath")
-              .map { sbtVersion =>
+                readSbtVersionFrom(classLoader)
+                  .toRight("Unable to read SBT version from JVM classpath")
+                  .map { sbtVersion =>
 
-              val checksum = DatatypeConverter.printHexBinary(md5(sourceJar))
-              val interfacesHome = new File(compilerInterfacesDir, sbtVersion + "-idea-" + checksum)
+                    val checksum = DatatypeConverter.printHexBinary(md5(sourceJar))
+                    val interfacesHome = new File(compilerInterfacesDir, sbtVersion + "-idea-" + checksum)
+                    new SbtData(interfaceJar, sourceJar, interfacesHome, javaClassVersion)
+                  }
+              }
 
-              new SbtData(interfaceJar, sourceJar, interfacesHome, javaClassVersion)
-            }
-          }
         }
       }
     }

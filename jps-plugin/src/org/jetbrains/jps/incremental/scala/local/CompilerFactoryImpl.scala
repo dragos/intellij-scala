@@ -4,7 +4,7 @@ package local
 import java.io.File
 import java.net.URLClassLoader
 
-import org.jetbrains.jps.incremental.scala.data.{CompilerData, CompilerJars, SbtData}
+import org.jetbrains.jps.incremental.scala.data.{CompilerData, CompilerJars, HydraData, SbtData}
 import org.jetbrains.jps.incremental.scala.local.CompilerFactoryImpl._
 import org.jetbrains.jps.incremental.scala.model.IncrementalityType
 import sbt.compiler.{AggressiveCompile, AnalyzingCompiler, IC}
@@ -60,19 +60,49 @@ class CompilerFactoryImpl(sbtData: SbtData) extends CompilerFactory {
 
 object CompilerFactoryImpl {
   private val scalaInstanceCache = new Cache[CompilerJars, ScalaInstance](3)
-  
+
   def createScalaInstance(jars: CompilerJars): ScalaInstance = {
     scalaInstanceCache.getOrUpdate(jars) {
+      val hydraSupportedScalaVersion = "2.11.8"
+      val desiredVersion = readProperty(jars.compiler, "compiler.properties", "version.number").getOrElse("0")
+      val compilerJar = HydraData.compilerJar(hydraSupportedScalaVersion)
 
+      println("Trying to use hydra:")
+      // hard-code the version we support right now
+      val useHydra = (desiredVersion == hydraSupportedScalaVersion) && compilerJar.isDefined
+      println(
+        s"""
+           |hydraSupportedScalaVersion: $hydraSupportedScalaVersion
+           |desiredVersion: $desiredVersion
+           |Hydra lib dir: ${HydraData.hydraLib}
+           |Hydra compilerJar: $compilerJar
+           |useHydra: $useHydra
+         """.stripMargin)
+
+      if (compilerJar.isEmpty)
+        println("Hydra files: " + HydraData.hydraFiles.mkString("\n"))
       val classLoader = {
-        val urls = Path.toURLs(jars.library +: jars.compiler +: jars.extra)
+        val hydraJars = HydraData.hydraFiles
+
+        val urls = if (useHydra)
+          Path.toURLs(jars.library +: hydraJars)
+        else
+          Path.toURLs(jars.library +: jars.compiler +: jars.extra)
+
         new URLClassLoader(urls, sbt.classpath.ClasspathUtilities.rootLoader)
       }
 
       val version = readScalaVersionIn(classLoader)
 
-      new ScalaInstance(version.getOrElse("unknown"), classLoader, jars.library, jars.compiler, jars.extra, version)
+      if (useHydra)
+        new ScalaInstance(version.getOrElse("unknown"), classLoader,
+          jars.library,
+          compilerJar.getOrElse(jars.compiler),
+          HydraData.otherFiles(hydraSupportedScalaVersion) ++ jars.extra.filterNot(_.getName.contains("scala-reflect")), version)
+      else
+        new ScalaInstance(version.getOrElse("unknown"), classLoader, jars.library, jars.compiler, jars.extra, version)
     }
+
 
   }
   
@@ -87,13 +117,15 @@ object CompilerFactoryImpl {
                                        client: Option[Client]): File = {
 
     val scalaVersion = scalaInstance.actualVersion
+    val compilerInterfaceSources = if (scalaVersion.contains("hydra")) HydraData.hydraBridge.get else sourceJar
+
     val interfaceId = "compiler-interface-" + scalaVersion + "-" + javaClassVersion
     val targetJar = new File(home, interfaceId + ".jar")
 
     if (!targetJar.exists) {
       client.foreach(_.progress("Compiling Scalac " + scalaVersion + " interface"))
       home.mkdirs()
-      IC.compileInterfaceJar(interfaceId, sourceJar, targetJar, interfaceJar, scalaInstance, NullLogger)
+      IC.compileInterfaceJar(interfaceId, compilerInterfaceSources, targetJar, interfaceJar, scalaInstance, NullLogger)
     }
 
     targetJar

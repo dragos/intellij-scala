@@ -69,9 +69,11 @@ object CompilationData {
 
       val outputGroups = createOutputGroups(chunk)
 
+      val sourcePathOption = Seq("-sourcepath", outputGroups.map(_._1).mkString(File.pathSeparator))
+
       val canonicalSources = sources.map(_.getCanonicalFile)
 
-      CompilationData(canonicalSources, classpath, output, commonOptions ++ scalaOptions, commonOptions ++ javaOptions,
+      CompilationData(canonicalSources, classpath, output, commonOptions ++ scalaOptions ++ sourcePathOption, commonOptions ++ javaOptions,
         order, cacheFile, relevantOutputToCacheMap, outputGroups, Some(compilerSettings.getSbtIncrementalOptions))
     }
   }
